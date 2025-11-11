@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     }
     // optional dev fallback (remove if you never want a default):
     if (!user_id) {
-      user_id = "40d98392-261c-4cf6-a4f0-1a28234aa079";
+      user_id = "1387b241-a55e-45e6-a091-072f64f8ffea";
     }
 
     const clientId     = process.env.MS_CLIENT_ID!;

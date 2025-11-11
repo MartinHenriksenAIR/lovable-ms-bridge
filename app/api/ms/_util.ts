@@ -52,5 +52,5 @@ export async function refreshAccessToken(user_id: string, tenant_id: string) {
 
 export function getUserId(req: Request) {
   // Dev: hardcode your UUID; Prod: pass real user id in 'x-user-id' header or session
-  return (req.headers.get("x-user-id") || "40d98392-261c-4cf6-a4f0-1a28234aa079").trim();
+  return (req.headers.get("x-user-id") || "1387b241-a55e-45e6-a091-072f64f8ffea").trim();
 }
