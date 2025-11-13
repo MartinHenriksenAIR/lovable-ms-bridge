@@ -1,58 +1,34 @@
+// app/api/ms/upload/route.ts
 export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 
-/**
- * POST /api/ms/upload
- *
- * JSON body:
- * {
- *   "user_id": "uuid",                  // required
- *   "tenant_id": "tenant-guid",         // required (for now)
- *   "docx_url": "https://...",          // required: URL to the DOCX file
- *   "filename": "MyReport.docx",        // required: how it should be named in SharePoint
- *
- *   // Optional overrides (normally taken from default folder)
- *   "drive_id": "b!....",
- *   "parent_item_id": "01WNW..."
- * }
- *
- * Behavior:
- *  - Calls /api/ms/token to get a fresh access_token and default SharePoint folder
- *  - Downloads the DOCX from docx_url
- *  - Uploads it to Microsoft Graph in the chosen folder
- *  - Returns the Graph DriveItem JSON
- */
+type TokenResponse = {
+  access_token: string;
+  sharepoint?: {
+    tenantId?: string;
+    driveId?: string;
+    parentItemId?: string;
+  };
+};
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null);
-
-    if (!body || typeof body !== "object") {
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
       return NextResponse.json(
         { error: "Invalid JSON body" },
         { status: 400 }
       );
     }
 
-    let {
+    const {
       user_id,
       tenant_id,
       docx_url,
       filename,
-      drive_id,
-      parent_item_id,
-    } = body as {
-      user_id?: string;
-      tenant_id?: string;
-      docx_url?: string;
-      filename?: string;
-      drive_id?: string;
-      parent_item_id?: string;
-    };
-
-    user_id = (user_id || "").trim();
-    tenant_id = (tenant_id || "").trim();
-    docx_url = (docx_url || "").trim();
-    filename = (filename || "").trim();
+    } = body || {};
 
     if (!user_id || !tenant_id || !docx_url || !filename) {
       return NextResponse.json(
@@ -64,113 +40,109 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1) Call our own /api/ms/token to get access_token + default folder
-    const origin = req.nextUrl.origin; // e.g., https://lovable-ms-bridge.vercel.app
+    const backendBase =
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : ""; // fallback if needed
 
-    const tokenResp = await fetch(`${origin}/api/ms/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({ user_id, tenant_id }),
-    });
-
-    const tokenJson = await tokenResp.json().catch(() => null);
-
-    if (!tokenResp.ok || !tokenJson || !tokenJson.access_token) {
-      return NextResponse.json(
-        {
-          error: "Failed to get Microsoft token from /api/ms/token",
-          detail: tokenJson || null,
-        },
-        { status: 502 }
-      );
-    }
-
-    const access_token = String(tokenJson.access_token);
-
-    // Prefer overrides from body, otherwise use the sharepoint.default folder
-    const sp = tokenJson.sharepoint || {};
-    const driveId = drive_id || sp.driveId;
-    const parentItemId = parent_item_id || sp.parentItemId;
-
-    if (!driveId || !parentItemId) {
+    if (!backendBase) {
       return NextResponse.json(
         {
           error:
-            "No SharePoint folder configured. Either set a default in sharepoint_folders or pass drive_id + parent_item_id.",
+            "Server misconfigured: cannot determine backend base URL (set NEXT_PUBLIC_BASE_URL or VERCEL_URL).",
         },
         { status: 500 }
       );
     }
 
-    // 2) Download the DOCX from docx_url
-    const docxResp = await fetch(docx_url);
+    // 1) Get fresh token + default SharePoint folder from your existing /api/ms/token
+    const tokenResp = await fetch(`${backendBase}/api/ms/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id, tenant_id }),
+    });
 
-    if (!docxResp.ok) {
-      const text = await docxResp.text().catch(() => "");
+    if (!tokenResp.ok) {
+      const txt = await tokenResp.text();
       return NextResponse.json(
-        {
-          error: "Failed to download DOCX from docx_url",
-          status: docxResp.status,
-          detail: text.slice(0, 500),
-        },
+        { error: "Token fetch failed", detail: txt },
         { status: 502 }
       );
     }
 
-    const arrayBuffer = await docxResp.arrayBuffer();
-    const docxBuffer = Buffer.from(arrayBuffer);
+    const tokenJson = (await tokenResp.json()) as TokenResponse;
+    const accessToken = tokenJson.access_token;
+    const driveId = tokenJson.sharepoint?.driveId;
+    const parentItemId = tokenJson.sharepoint?.parentItemId;
 
-    // 3) Upload to Microsoft Graph
-    const encodedName = encodeURIComponent(filename);
-    const uploadUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(
+    if (!accessToken || !driveId || !parentItemId) {
+      return NextResponse.json(
+        {
+          error:
+            "Token endpoint did not return access_token/driveId/parentItemId",
+          detail: tokenJson,
+        },
+        { status: 500 }
+      );
+    }
+
+    // 2) Download DOCX from Supabase (or wherever docx_url points)
+    const docxResp = await fetch(docx_url);
+    if (!docxResp.ok) {
+      const txt = await docxResp.text();
+      return NextResponse.json(
+        { error: "Failed to download DOCX", status: docxResp.status, detail: txt },
+        { status: 502 }
+      );
+    }
+    const docxArrayBuf = await docxResp.arrayBuffer();
+    const docxBuffer = Buffer.from(docxArrayBuf);
+
+    // 3) Upload DOCX to SharePoint using Microsoft Graph
+    const graphUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(
       driveId
     )}/items/${encodeURIComponent(
       parentItemId
-    )}:/${encodedName}:/content`;
+    )}:/${encodeURIComponent(filename)}:/content`;
 
-    const graphResp = await fetch(uploadUrl, {
+    const upResp = await fetch(graphUrl, {
       method: "PUT",
       headers: {
-        Authorization: `Bearer ${access_token}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       },
       body: docxBuffer,
     });
 
-    const graphText = await graphResp.text().catch(() => "");
-
-    if (!graphResp.ok) {
-      let detail: any = graphText;
-      try {
-        detail = JSON.parse(graphText);
-      } catch {
-        // leave as text
-      }
-
+    const upText = await upResp.text();
+    if (!upResp.ok) {
       return NextResponse.json(
         {
-          error: "Failed to upload DOCX to SharePoint",
-          status: graphResp.status,
-          detail,
+          error: "Graph upload failed",
+          status: upResp.status,
+          detail: upText,
         },
         { status: 502 }
       );
     }
 
-    // Successful upload: Graph returns a DriveItem JSON
-    let driveItem: any = {};
+    // Graph normally returns JSON describing the driveItem
+    let upJson: any = null;
     try {
-      driveItem = JSON.parse(graphText);
+      upJson = JSON.parse(upText);
     } catch {
-      driveItem = { raw: graphText };
+      upJson = { raw: upText };
     }
 
-    return NextResponse.json(driveItem);
+    return NextResponse.json({
+      ok: true,
+      item: upJson,
+    });
   } catch (e: any) {
     return NextResponse.json(
-      { error: "Unexpected server error", detail: String(e?.message || e) },
+      { error: String(e?.message || e) },
       { status: 500 }
     );
   }
