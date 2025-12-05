@@ -3,6 +3,10 @@
 import React, { useState } from "react";
 import SignatureCanvas from "@/components/SignatureCanvas";
 
+// TODO: Replace this with a REAL Supabase URL to one of your BYGGE PDFs
+const TEST_PDF_URL =
+  "https://airadgivning.sharepoint.com/sites/AIRdgivning/_layouts/15/download.aspx?UniqueId=f237e8f3-012b-4036-a3ae-4846d7994e44&Translate=false&tempauth=v1.eyJzaXRlaWQiOiIyODc5ZWI5YS1mZGI3LTQxZjEtOGJlYi00NDEzMDg3ZjFlOTUiLCJhcHBfZGlzcGxheW5hbWUiOiJMb3ZhYmxlIFNoYXJlUG9pbnQgKERlbGVnYXRlZCBNdWx0aVRlbmFudCkiLCJhcHBpZCI6ImVmYzkwYzNhLWVlYTAtNGYzOS1hNDVjLWVjMDYzZmE1MmVmNSIsImF1ZCI6IjAwMDAwMDAzLTAwMDAtMGZmMS1jZTAwLTAwMDAwMDAwMDAwMC9haXJhZGdpdm5pbmcuc2hhcmVwb2ludC5jb21AOWRlM2Q5YzMtYjBiYi00ZDJlLTkzYWItZjY0MDdhOGIzNzkzIiwiZXhwIjoiMTc2NDg2MDcwNyJ9.CkAKDGVudHJhX2NsYWltcxIwQ09Tbnhza0dFQUFhRm5OUVEwdDFVRmhEU0ZWeFJIaGtOMWd5UTFscFFVRXFBQT09CjIKCmFjdG9yYXBwaWQSJDAwMDAwMDAzLTAwMDAtMDAwMC1jMDAwLTAwMDAwMDAwMDAwMAoKCgRzbmlkEgI2NBILCJCH5pqF0tk-EAUaDTQwLjEyNi4yMy4xNjIqLDV1anVIVkE2ZnlDd2lodExSMWNzdXNKMUx0azUrVzJpNjZwbVB1WXRNNFk9MI0BOAFCEKHfvbKg0ADgpyyNSTY7WOZKEGhhc2hlZHByb29mdG9rZW5SCFsia21zaSJdaiQwMDlhOWEzOS0wN2UxLTBkMjYtZTFjYi1kNGM0NzAyMTNkMzZyKTBoLmZ8bWVtYmVyc2hpcHwxMDAzMjAwNGJmYjg1MjkzQGxpdmUuY29tegEyggESCcPZ4527sC5NEZOr9kB6izeTkgEGTWFydGlumgEJSGVucmlrc2VuogEZbWFydGluaEBhaS1yYWFkZ2l2bmluZy5ka6oBEDEwMDMyMDA0QkZCODUyOTOyAWphbGxmaWxlcy5yZWFkIG15ZmlsZXMud3JpdGUgYWxsZmlsZXMud3JpdGUgbXlhcHBmb2xkZXIud3JpdGUgYWxsc2l0ZXMucmVhZCBhbGxzaXRlcy53cml0ZSBhbGxwcm9maWxlcy5yZWFkyAEB.ERs1V6tOcTNdSkApXagmkRmHR25DZHSE2SHL-0-70Ao&ApiVersion=2.0";
+
 /**
  * Helper to download a base64-encoded PDF as a file in the browser.
  */
@@ -38,6 +42,13 @@ export default function TestSignaturePage() {
       return;
     }
 
+    if (!TEST_PDF_URL || TEST_PDF_URL.startsWith("https://your-supabase")) {
+      alert(
+        "Please set TEST_PDF_URL at the top of this file to a real Supabase PDF URL before testing."
+      );
+      return;
+    }
+
     setIsGenerating(true);
 
     try {
@@ -48,6 +59,7 @@ export default function TestSignaturePage() {
         },
         body: JSON.stringify({
           signaturePngDataUrl: dataUrl,
+          pdfUrl: TEST_PDF_URL,
         }),
       });
 
@@ -64,7 +76,7 @@ export default function TestSignaturePage() {
         return;
       }
 
-      downloadBase64Pdf(json.pdfBase64, "ink-mark-test.pdf");
+      downloadBase64Pdf(json.pdfBase64, "bygge-report-with-mark.pdf");
     } catch (error) {
       console.error("Error calling /api/apply-signature:", error);
       alert("Something went wrong while generating the PDF.");
@@ -83,12 +95,17 @@ export default function TestSignaturePage() {
       }}
     >
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>
-        Test: Ink Mark Capture + PDF
+        Test: Ink Mark on REAL BYGGE Report
       </h1>
 
-      <p style={{ marginBottom: 16, fontSize: 14, color: "#555" }}>
-        1) Draw a mark below. 2) Click &quot;Use this mark&quot; in the box. 3)
-        Click &quot;Generate PDF with this mark&quot; to download a test PDF.
+      <p style={{ marginBottom: 12, fontSize: 14, color: "#555" }}>
+        1) Make sure <code>TEST_PDF_URL</code> at the top of this file points
+        to a real PDF in Supabase.
+        <br />
+        2) Draw a mark below and click &quot;Use this mark&quot;.
+        <br />
+        3) Click &quot;Generate PDF with this mark&quot; to download a new
+        version of that report with the ink mark applied.
       </p>
 
       <SignatureCanvas onChange={setDataUrl} />
@@ -107,9 +124,8 @@ export default function TestSignaturePage() {
             }}
           />
           <p style={{ fontSize: 12, color: "#777", marginTop: 8 }}>
-            This image is generated from the{" "}
-            <code style={{ fontSize: 12 }}>data:image/png;base64,...</code>{" "}
-            string that will be embedded into the PDF.
+            This is the PNG that will be embedded into your real BYGGE report
+            PDF from Supabase.
           </p>
         </div>
       )}

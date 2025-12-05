@@ -8,12 +8,13 @@ import { PDFDocument } from "pdf-lib";
  *
  * Expects JSON body:
  * {
- *   "signaturePngDataUrl": "data:image/png;base64,...."
+ *   "signaturePngDataUrl": "data:image/png;base64,...",
+ *   "pdfUrl": "https://.../your-report.pdf"
  * }
  *
  * Returns:
  * {
- *   "pdfBase64": "<base64 encoded PDF>"
+ *   "pdfBase64": "<base64 encoded FINAL PDF with ink mark>"
  * }
  */
 export async function POST(req: NextRequest) {
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     const signaturePngDataUrl = body.signaturePngDataUrl as string | undefined;
+    const pdfUrl = body.pdfUrl as string | undefined;
 
     if (!signaturePngDataUrl || typeof signaturePngDataUrl !== "string") {
       return NextResponse.json(
@@ -29,56 +31,86 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1) Strip the "data:image/png;base64," prefix
+    if (!pdfUrl || typeof pdfUrl !== "string") {
+      return NextResponse.json(
+        { error: "pdfUrl is required" },
+        { status: 400 }
+      );
+    }
+
+    // ----------------------------------------------------------------
+    // 1) Download your REAL report PDF from Supabase (or any URL)
+    // ----------------------------------------------------------------
+    const pdfResponse = await fetch(pdfUrl);
+
+    if (!pdfResponse.ok) {
+      return NextResponse.json(
+        {
+          error: "Failed to fetch PDF from pdfUrl",
+          status: pdfResponse.status,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Response body -> ArrayBuffer -> Uint8Array
+    const pdfArrayBuffer = await pdfResponse.arrayBuffer();
+    const existingPdfBytes = new Uint8Array(pdfArrayBuffer);
+
+    // ----------------------------------------------------------------
+    // 2) Decode the signature PNG data URL into bytes
+    // ----------------------------------------------------------------
     const commaIndex = signaturePngDataUrl.indexOf(",");
     if (commaIndex === -1) {
       return NextResponse.json(
-        { error: "Invalid data URL format" },
+        { error: "Invalid signature data URL format" },
         { status: 400 }
       );
     }
     const base64Signature = signaturePngDataUrl.slice(commaIndex + 1);
 
-    // 2) Convert Base64 -> Uint8Array (PNG bytes)
     const signatureBytes = Uint8Array.from(
       Buffer.from(base64Signature, "base64")
     );
 
-    // 3) Create a new PDF document (we'll embed the mark here)
-    const pdfDoc = await PDFDocument.create();
+    // ----------------------------------------------------------------
+    // 3) Load the EXISTING PDF with pdf-lib
+    // ----------------------------------------------------------------
+    const pdfDoc = await PDFDocument.load(existingPdfBytes);
 
-    // A4 size in points: [width, height]
-    const pageWidth = 595.28;
-    const pageHeight = 841.89;
+    // Get the last page of the existing report
+    const pages = pdfDoc.getPages();
+    const lastPage = pages[pages.length - 1];
 
-    const page = pdfDoc.addPage([pageWidth, pageHeight]);
+    const { width: pageWidth, height: pageHeight } = lastPage.getSize();
 
-    // 4) Embed the PNG image
+    // ----------------------------------------------------------------
+    // 4) Embed the signature PNG into the PDF
+    // ----------------------------------------------------------------
     const pngImage = await pdfDoc.embedPng(signatureBytes);
 
-    // Decide how big the signature should be on the PDF
-    const desiredWidth = 200; // points
+    // Decide how big the ink mark should be on the page
+    const desiredWidth = 200; // in PDF points
     const aspectRatio = pngImage.height / pngImage.width;
     const desiredHeight = desiredWidth * aspectRatio;
 
-    // 5) Choose position (bottom-right)
-    const margin = 50; // 50pt from edges
+    // Choose position: bottom-right with some margin
+    const margin = 50; // 50pt gap from edges
     const x = pageWidth - desiredWidth - margin;
     const y = margin;
 
-    // 6) Draw the image on the page
-    page.drawImage(pngImage, {
+    lastPage.drawImage(pngImage, {
       x,
       y,
       width: desiredWidth,
       height: desiredHeight,
     });
 
-    // 7) Save PDF to bytes
-    const pdfBytes = await pdfDoc.save();
-
-    // 8) Encode bytes as Base64 for JSON transport
-    const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
+    // ----------------------------------------------------------------
+    // 5) Save the UPDATED PDF and return as base64
+    // ----------------------------------------------------------------
+    const updatedPdfBytes = await pdfDoc.save();
+    const pdfBase64 = Buffer.from(updatedPdfBytes).toString("base64");
 
     return NextResponse.json({ pdfBase64 }, { status: 200 });
   } catch (err) {
