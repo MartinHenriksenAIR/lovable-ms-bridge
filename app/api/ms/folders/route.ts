@@ -4,10 +4,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { refreshAccessToken, getUserId } from "../_util";
 
 export async function GET(req: NextRequest) {
-  const user_id = getUserId(req);
+  const user_id  = getUserId(req);
   const tenant_id = req.nextUrl.searchParams.get("tenantId");
   const driveId   = req.nextUrl.searchParams.get("driveId");
-  const parentId  = req.nextUrl.searchParams.get("parentId") || "root";
+
+  // Support both ?parentId=... and ?itemId=... for compatibility
+  const parentIdParam =
+    req.nextUrl.searchParams.get("parentId") ??
+    req.nextUrl.searchParams.get("itemId") ??
+    "root";
+
+  const parentId = parentIdParam || "root";
 
   if (!tenant_id || !driveId) {
     return NextResponse.json({ error: "tenantId and driveId required" }, { status: 400 });
@@ -23,7 +30,7 @@ export async function GET(req: NextRequest) {
         : `${base}/items/${encodeURIComponent(parentId)}/children?$top=200`;
 
     const g = await fetch(url, {
-      headers: { Authorization: `Bearer ${access}`, Accept: "application/json" }
+      headers: { Authorization: `Bearer ${access}`, Accept: "application/json" },
     });
 
     const txt = await g.text();
@@ -33,17 +40,17 @@ export async function GET(req: NextRequest) {
     if (!g.ok) {
       return NextResponse.json(
         { error: "Graph list children failed", status: g.status, detail: js, url },
-        { status: 502 }
+        { status: 502 },
       );
     }
 
     const folders = (js.value || [])
-      .filter((it: any) => it.folder)  // only folders
+      .filter((it: any) => it.folder) // only folders
       .map((it: any) => ({
         id: it.id,
         name: it.name,
         path: it.parentReference?.path || "",
-        webUrl: it.webUrl
+        webUrl: it.webUrl,
       }));
 
     return NextResponse.json({ folders });
